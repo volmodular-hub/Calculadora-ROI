@@ -1,3 +1,4 @@
 streamlit
 pandas
 fpdf
+pip install requests beautifulsoup4
