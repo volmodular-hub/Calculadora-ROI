@@ -6,30 +6,28 @@ import os
 import json
 import re
 import base64
-import requests # Usamos esto para conectarnos directo, sin librerías de Google
+import requests # Conexión directa "a prueba de balas"
 from PIL import Image
 from io import BytesIO
 import urllib.parse 
 
 # ==========================================
-# 🔐 CONFIGURACIÓN (CLAVE GRATIS DE GOOGLE)
+# 🔐 TU CLAVE DE GOOGLE
 # ==========================================
-# Tu clave de Google (Gemini) va aquí. Es GRATIS y NO pide tarjeta.
 GOOGLE_API_KEY = "AIzaSyBXfXVgHa9j_UrdiFrYaeQ_GgrX9LpTwDQ" 
 LOGOTIPO = "logo.png"
 
-st.set_page_config(page_title="Promotora IA Directa", layout="wide", page_icon="🏗️")
+st.set_page_config(page_title="Promotora IA Todoterreno", layout="wide", page_icon="🏗️")
 
 # ==========================================
-# 🧠 CEREBRO IA (CONEXIÓN DIRECTA HTTP)
+# 🧠 CEREBRO IA (MULTIMODELO)
 # ==========================================
 
-def analizar_imagen_directo(image, tipo="testigo"):
+def analizar_imagen_bruteforce(image, tipo="testigo"):
     """
-    Se conecta a Google Gemini mediante HTTP puro.
-    Esto EVITA los errores de 'Librería desactualizada'.
+    Intenta conectar con 4 modelos distintos de Google hasta que uno responda.
     """
-    # 1. Convertir imagen a Base64 (Texto)
+    # 1. Preparar imagen en base64
     buffered = BytesIO()
     if image.mode in ("RGBA", "P"): image = image.convert("RGB")
     image.save(buffered, format="JPEG")
@@ -41,56 +39,66 @@ def analizar_imagen_directo(image, tipo="testigo"):
     else:
         texto_prompt = "Analiza el anuncio del terreno. Extrae: PRECIO (número), UBICACION (texto corto) y M2_SUELO (número). Responde SOLO JSON: {'precio': 0, 'ubicacion': '', 'm2_suelo': 0}."
 
-    # 3. La URL Mágica (Conexión Directa a Google)
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GOOGLE_API_KEY}"
-    
-    # 4. El Paquete de Datos
-    payload = {
-        "contents": [{
-            "parts": [
-                {"text": texto_prompt},
-                {"inline_data": {
-                    "mime_type": "image/jpeg",
-                    "data": img_str
-                }}
-            ]
-        }]
-    }
-    
-    try:
-        # Enviamos la petición
-        response = requests.post(url, json=payload, headers={'Content-Type': 'application/json'})
-        
-        if response.status_code != 200:
-            st.error(f"Error Google: {response.status_code} - {response.text}")
-            return {}
-            
-        resultado = response.json()
-        
-        # Extraer el texto de la respuesta compleja de Google
-        texto_ia = resultado['candidates'][0]['content']['parts'][0]['text']
-        
-        # Limpiar JSON
-        match = re.search(r'\{.*\}', texto_ia, re.DOTALL)
-        if match:
-            return json.loads(match.group(0))
-        else:
-            return {}
+    # 3. LISTA DE MODELOS (Si uno falla, probamos el siguiente)
+    modelos_a_probar = [
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-latest",
+        "gemini-1.5-flash-001",
+        "gemini-pro-vision" # El viejo confiable
+    ]
 
-    except Exception as e:
-        st.error(f"Error de conexión: {e}")
-        return {}
+    # 4. Bucle de intentos
+    for modelo in modelos_a_probar:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent?key={GOOGLE_API_KEY}"
+        
+        payload = {
+            "contents": [{
+                "parts": [
+                    {"text": texto_prompt},
+                    {"inline_data": {
+                        "mime_type": "image/jpeg",
+                        "data": img_str
+                    }}
+                ]
+            }]
+        }
+        
+        try:
+            # st.toast(f"Probando modelo: {modelo}...", icon="🔄") # Comentado para no molestar visualmente
+            response = requests.post(url, json=payload, headers={'Content-Type': 'application/json'})
+            
+            if response.status_code == 200:
+                # ¡ÉXITO!
+                st.success(f"Conectado con éxito usando: {modelo}")
+                resultado = response.json()
+                texto_ia = resultado['candidates'][0]['content']['parts'][0]['text']
+                
+                # Limpiar JSON
+                match = re.search(r'\{.*\}', texto_ia, re.DOTALL)
+                if match:
+                    return json.loads(match.group(0))
+                else:
+                    return {} # Respondió pero no JSON
+            else:
+                # Si es 404, seguimos al siguiente modelo del bucle
+                continue 
+
+        except Exception as e:
+            continue
+
+    st.error("❌ Todos los modelos de Google han fallado. Revisa tu conexión a internet.")
+    return {}
 
 def generar_render_arquitectonico(ubicacion, estilo):
     """
-    Genera render usando Pollinations AI (Gratis 100%)
+    Render gratuito con Pollinations
     """
     prompt = f"architectural render of a {estilo} house, located in {ubicacion}, sunny day, blue sky, cinematic lighting, 8k resolution, photorealistic"
     prompt_encoded = urllib.parse.quote(prompt)
     return f"https://image.pollinations.ai/prompt/{prompt_encoded}?width=1280&height=720&nologo=true&seed={datetime.datetime.now().microsecond}"
 
 # ==========================================
-# 📄 GENERADOR PDF
+# 📄 PDF
 # ==========================================
 class PDF(FPDF):
     def header(self):
@@ -126,6 +134,7 @@ def generar_pdf(terreno, testigos, financiero, render_path=None):
             pdf.ln(110) 
         except: pass
     
+    # DATOS
     pdf.set_font('Arial', 'B', 12)
     pdf.cell(0, 10, "RESUMEN EJECUTIVO", 0, 1)
     pdf.set_font('Arial', '', 11)
@@ -164,8 +173,8 @@ def generar_pdf(terreno, testigos, financiero, render_path=None):
 # ==========================================
 # 📱 INTERFAZ PRINCIPAL
 # ==========================================
-st.title("🏗️ Calculadora Promotora (Modo Directo)")
-st.caption("Conexión directa a Google Gemini (Sin errores de librería)")
+st.title("🏗️ Calculadora Promotora (Modo Todoterreno)")
+st.caption("Prueba automática de múltiples modelos IA hasta conectar.")
 st.markdown("---")
 
 with st.sidebar:
@@ -182,8 +191,6 @@ if "suelo_data" not in st.session_state:
     st.session_state["suelo_data"] = {"precio": 100000.0, "nombre": "Parcela", "m2": 500.0, "render": None}
 
 c1, c2 = st.columns([1, 1.5])
-
-# SUELO
 with c1:
     st.subheader("1. Terreno")
     tab_m, tab_f = st.tabs(["✍️ Manual", "📸 Foto Cartel"])
@@ -191,16 +198,15 @@ with c1:
         up_suelo = st.file_uploader("Foto Terreno", type=["jpg", "png", "jpeg"], key="u_suelo")
         if up_suelo:
             img_s = Image.open(up_suelo)
-            if st.button("🧠 Analizar Suelo (Directo)"):
-                with st.spinner("Conectando con Google..."):
-                    datos = analizar_imagen_directo(img_s, "suelo")
+            if st.button("🧠 Analizar Suelo"):
+                with st.spinner("Probando modelos de Google..."):
+                    datos = analizar_imagen_bruteforce(img_s, "suelo")
                     if datos:
                         st.session_state["suelo_data"]["precio"] = float(datos.get("precio", 0))
                         st.session_state["suelo_data"]["m2"] = float(datos.get("m2_suelo", 0))
                         ubi = datos.get("ubicacion", "")
                         if ubi: st.session_state["suelo_data"]["nombre"] = ubi
-                        st.success("¡Datos extraídos!")
-                    else: st.warning("No se pudo leer.")
+                    else: st.warning("Ningún modelo pudo leer la foto.")
 
     nombre_terreno = st.text_input("Ubicación", value=st.session_state["suelo_data"]["nombre"])
     precio_terreno = st.number_input("Precio Suelo (€)", value=st.session_state["suelo_data"]["precio"], step=1000.0)
@@ -219,7 +225,6 @@ with c1:
                     st.image(url_render, caption=estilo_casa)
             except Exception as e: st.error(e)
 
-# TESTIGOS
 with c2:
     st.subheader("2. Comparables")
     lista_testigos = []
@@ -237,8 +242,8 @@ with c2:
                 st.session_state[f"dt_{i}"]["path"] = path
                 
                 if st.session_state[f"dt_{i}"]["p"] == 0:
-                    with st.spinner("Leyendo..."):
-                        datos = analizar_imagen_directo(img_t, "testigo")
+                    with st.spinner("Analizando..."):
+                        datos = analizar_imagen_bruteforce(img_t, "testigo")
                         st.session_state[f"dt_{i}"]["p"] = float(datos.get("precio", 0))
                         st.session_state[f"dt_{i}"]["m"] = float(datos.get("m2", 0))
 
@@ -248,7 +253,6 @@ with c2:
                 m = st.number_input("m2", value=d["m"], key=f"m_{i}", step=1.0)
                 if p > 0: lista_testigos.append({"precio":p, "m2":m, "img_path":d["path"]})
 
-# CÁLCULO
 st.markdown("---")
 if st.button("ANALIZAR VIABILIDAD", type="primary", use_container_width=True):
     if not lista_testigos:
