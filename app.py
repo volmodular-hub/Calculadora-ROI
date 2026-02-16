@@ -12,9 +12,9 @@ import requests
 from io import BytesIO
 
 # ==========================================
-# 🔐 CONFIGURACIÓN
+# 🔐 CONFIGURACIÓN CON TU NUEVA CLAVE
 # ==========================================
-GOOGLE_API_KEY = "AIzaSyDAeL2GfyusB3w55sLur27b7t7I_rbETy4" 
+GOOGLE_API_KEY = "AIzaSyBXfXVgHa9j_UrdiFrYaeQ_GgrX9LpTwDQ" 
 LOGOTIPO = "logo.png"
 
 try:
@@ -30,9 +30,9 @@ st.set_page_config(page_title="Promotora IA", layout="wide", page_icon="🏗️"
 
 def analizar_imagen_generico(image, tipo="testigo"):
     """
-    Intenta usar Gemini Flash. Si falla (Error 404), usa Gemini Pro Vision automáticamente.
+    Usa la IA para extraer datos de las fotos.
     """
-    # 1. Definimos el prompt
+    # 1. Definimos el prompt según lo que estemos mirando
     if tipo == "testigo":
         prompt = """
         Actúa como un experto en datos inmobiliarios. Analiza esta imagen.
@@ -51,41 +51,30 @@ def analizar_imagen_generico(image, tipo="testigo"):
         Formato: {"precio": 100000, "ubicacion": "Calle Mayor", "m2_suelo": 500}
         """
 
-    # 2. Intentamos conectar con los modelos
     try:
-        # INTENTO A: Modelo Nuevo (Flash)
+        # Intentamos usar el modelo más rápido y moderno
         model = genai.GenerativeModel('gemini-1.5-flash')
         response = model.generate_content([prompt, image])
-    except Exception as e:
-        # Si falla (tu error 404), usamos INTENTO B: Modelo Clásico
-        # st.toast(f"Usando modelo de respaldo por error: {e}", icon="ℹ️")
-        try:
-            model = genai.GenerativeModel('gemini-pro-vision')
-            response = model.generate_content([prompt, image])
-        except Exception as e2:
-            st.error(f"❌ Error total de IA: {e2}")
-            return {}
-
-    # 3. Procesar la respuesta
-    try:
-        # Buscamos el JSON con Regex por si la IA añade texto extra
+        
+        # Limpieza de respuesta con Regex (por si la IA añade texto extra)
         match = re.search(r'\{.*\}', response.text, re.DOTALL)
         if match:
             json_str = match.group(0)
             return json.loads(json_str)
         else:
             return {}
-    except:
+
+    except Exception as e:
+        st.error(f"❌ Error de IA: {e}")
+        st.info("💡 SI VES UN ERROR 404: Abre la terminal y escribe: pip install --upgrade google-generativeai")
         return {}
 
 def generar_render_arquitectonico(ubicacion, estilo):
     """
-    Genera una URL de una imagen usando IA generativa.
+    Genera una URL de una imagen usando IA generativa (Pollinations).
     """
-    # Prompt en inglés para mejor calidad
     prompt = f"architectural render of a {estilo} house, located in {ubicacion}, sunny day, blue sky, cinematic lighting, 8k resolution, photorealistic, architectural photography"
     prompt_encoded = urllib.parse.quote(prompt)
-    # API Gratuita Pollinations
     url_imagen = f"https://image.pollinations.ai/prompt/{prompt_encoded}?width=1280&height=720&nologo=true&seed={datetime.datetime.now().microsecond}"
     return url_imagen
 
@@ -186,7 +175,7 @@ with st.sidebar:
     m2_objetivo = st.number_input("m² Construcción Objetivo", 180)
     estilo_casa = st.selectbox("Estilo Diseño", ["Moderno Mediterráneo", "Minimalista Cubico", "Clásico", "Industrial"])
 
-# VARIABLES DE ESTADO (Para no perder datos al recargar)
+# VARIABLES DE ESTADO
 if "suelo_data" not in st.session_state:
     st.session_state["suelo_data"] = {"precio": 100000.0, "nombre": "Parcela", "m2": 500.0, "render": None}
 
@@ -224,7 +213,6 @@ with c1:
         with st.spinner("El arquitecto IA está dibujando..."):
             try:
                 url_render = generar_render_arquitectonico(nombre_terreno, estilo_casa)
-                # Descargar imagen para PDF
                 resp = requests.get(url_render)
                 if resp.status_code == 200:
                     img_r = Image.open(BytesIO(resp.content))
@@ -255,7 +243,6 @@ with c2:
             # PROCESO IA
             if up_t:
                 img_t = Image.open(up_t)
-                # Convertir a RGB y guardar temporal
                 if img_t.mode != 'RGB': img_t = img_t.convert('RGB')
                 path = f"temp_t_{i}.jpg"
                 img_t.save(path)
@@ -289,7 +276,6 @@ if st.button("ANALIZAR VIABILIDAD", type="primary", use_container_width=True):
             media_m2 = sum([t['precio']/t['m2'] for t in validos])/len(validos)
             precio_venta = media_m2 * m2_objetivo
         else:
-            # Fallback si no hay m2
             precio_venta = sum([t['precio'] for t in lista_testigos])/len(lista_testigos)
             media_m2 = 0
 
