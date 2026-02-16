@@ -1,5 +1,5 @@
 streamlit
 pandas
 fpdf
-beautifulsoup4
-cloudscraper
+Pillow
+google-generativeai
