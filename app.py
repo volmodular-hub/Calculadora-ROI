@@ -4,17 +4,16 @@ from fpdf import FPDF
 import datetime
 import os
 import json
-import re  # IMPORTANTE: Para buscar el JSON entre el texto
+import re
 import google.generativeai as genai
 from PIL import Image
 import urllib.parse 
-import requests # Para descargar el render
+import requests 
 from io import BytesIO
 
 # ==========================================
 # 🔐 CONFIGURACIÓN
 # ==========================================
-# TU CLAVE API AQUÍ
 GOOGLE_API_KEY = "AIzaSyDAeL2GfyusB3w55sLur27b7t7I_rbETy4" 
 LOGOTIPO = "logo.png"
 
@@ -23,7 +22,7 @@ try:
 except Exception as e:
     st.error(f"Error Configuración API: {e}")
 
-st.set_page_config(page_title="Promotora IA Debug", layout="wide", page_icon="🏗️")
+st.set_page_config(page_title="Promotora IA", layout="wide", page_icon="🏗️")
 
 # ==========================================
 # 🧠 CEREBRO IA (VISIÓN & RENDER)
@@ -31,18 +30,16 @@ st.set_page_config(page_title="Promotora IA Debug", layout="wide", page_icon="�
 
 def analizar_imagen_generico(image, tipo="testigo"):
     """
-    Versión BLINDADA con depuración para ver por qué falla.
+    Intenta usar Gemini Flash. Si falla (Error 404), usa Gemini Pro Vision automáticamente.
     """
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    
-    # 1. Elegir el Prompt (Instrucciones) según qué estemos mirando
+    # 1. Definimos el prompt
     if tipo == "testigo":
         prompt = """
         Actúa como un experto en datos inmobiliarios. Analiza esta imagen.
         Tu objetivo es extraer el PRECIO DE VENTA y los METROS CUADRADOS (m2).
         Responde ÚNICAMENTE con un objeto JSON válido.
         Formato: {"precio": 150000, "m2": 90}
-        Si no encuentras algún dato, pon el valor 0. No inventes.
+        Si no encuentras algún dato, pon el valor 0.
         """
     else: # SUELO
         prompt = """
@@ -51,31 +48,34 @@ def analizar_imagen_generico(image, tipo="testigo"):
         1. "precio": Precio de venta (número).
         2. "ubicacion": Nombre de la calle, barrio o zona que aparezca (texto).
         3. "m2_suelo": Metros cuadrados de la PARCELA (número).
-        
         Formato: {"precio": 100000, "ubicacion": "Calle Mayor", "m2_suelo": 500}
         """
-    
-    try:
-        with st.spinner(f"🤖 La IA está leyendo el {tipo}..."):
-            response = model.generate_content([prompt, image])
-            
-            # --- ZONA DE DEPURACIÓN (VISIBLE EN PANTALLA) ---
-            # Esto te ayudará a entender por qué falla si sale 0
-            with st.expander(f"🕵️ Ver Datos Crudos de la IA ({tipo}) - Debug"):
-                st.write(f"**Texto detectado:** {response.text}")
-            
-            # --- EXTRACCIÓN ROBUSTA CON REGEX ---
-            # Buscamos cualquier cosa que parezca un JSON { ... }
-            match = re.search(r'\{.*\}', response.text, re.DOTALL)
-            
-            if match:
-                json_str = match.group(0)
-                return json.loads(json_str)
-            else:
-                return {}
 
+    # 2. Intentamos conectar con los modelos
+    try:
+        # INTENTO A: Modelo Nuevo (Flash)
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content([prompt, image])
     except Exception as e:
-        st.error(f"❌ Error de Conexión/API: {e}")
+        # Si falla (tu error 404), usamos INTENTO B: Modelo Clásico
+        # st.toast(f"Usando modelo de respaldo por error: {e}", icon="ℹ️")
+        try:
+            model = genai.GenerativeModel('gemini-pro-vision')
+            response = model.generate_content([prompt, image])
+        except Exception as e2:
+            st.error(f"❌ Error total de IA: {e2}")
+            return {}
+
+    # 3. Procesar la respuesta
+    try:
+        # Buscamos el JSON con Regex por si la IA añade texto extra
+        match = re.search(r'\{.*\}', response.text, re.DOTALL)
+        if match:
+            json_str = match.group(0)
+            return json.loads(json_str)
+        else:
+            return {}
+    except:
         return {}
 
 def generar_render_arquitectonico(ubicacion, estilo):
@@ -173,7 +173,6 @@ def generar_pdf(terreno, testigos, financiero, render_path=None):
 # ==========================================
 
 st.title("🏗️ Calculadora Promotora IA")
-st.caption("Versión con Depuración de Errores")
 st.markdown("---")
 
 # CONFIGURACIÓN LATERAL
@@ -204,15 +203,16 @@ with c1:
         if up_suelo:
             img_s = Image.open(up_suelo)
             if st.button("🧠 Analizar Foto Suelo"):
-                datos = analizar_imagen_generico(img_s, "suelo")
-                if datos:
-                    st.session_state["suelo_data"]["precio"] = float(datos.get("precio", 0))
-                    st.session_state["suelo_data"]["m2"] = float(datos.get("m2_suelo", 0))
-                    ubi = datos.get("ubicacion", "")
-                    if ubi: st.session_state["suelo_data"]["nombre"] = ubi
-                    st.success("Datos actualizados!")
-                else:
-                    st.warning("No se pudo extraer JSON. Revisa el desplegable 'Depuración' arriba.")
+                with st.spinner("Analizando..."):
+                    datos = analizar_imagen_generico(img_s, "suelo")
+                    if datos:
+                        st.session_state["suelo_data"]["precio"] = float(datos.get("precio", 0))
+                        st.session_state["suelo_data"]["m2"] = float(datos.get("m2_suelo", 0))
+                        ubi = datos.get("ubicacion", "")
+                        if ubi: st.session_state["suelo_data"]["nombre"] = ubi
+                        st.success("¡Datos extraídos!")
+                    else:
+                        st.warning("No se pudo leer la foto. Introdúcelo manual.")
 
     # Campos editables
     nombre_terreno = st.text_input("Ubicación", value=st.session_state["suelo_data"]["nombre"])
@@ -221,7 +221,7 @@ with c1:
 
     st.markdown("#### 🎨 Diseño Virtual")
     if st.button("✨ Generar Render (IA)"):
-        with st.spinner("Generando imagen arquitectónica..."):
+        with st.spinner("El arquitecto IA está dibujando..."):
             try:
                 url_render = generar_render_arquitectonico(nombre_terreno, estilo_casa)
                 # Descargar imagen para PDF
@@ -263,9 +263,10 @@ with c2:
                 
                 # Si precio es 0, intentar leer
                 if st.session_state[f"dt_{i}"]["p"] == 0:
-                    datos = analizar_imagen_generico(img_t, "testigo")
-                    st.session_state[f"dt_{i}"]["p"] = float(datos.get("precio", 0))
-                    st.session_state[f"dt_{i}"]["m"] = float(datos.get("m2", 0))
+                    with st.spinner("Leyendo..."):
+                        datos = analizar_imagen_generico(img_t, "testigo")
+                        st.session_state[f"dt_{i}"]["p"] = float(datos.get("precio", 0))
+                        st.session_state[f"dt_{i}"]["m"] = float(datos.get("m2", 0))
 
             # INPUTS
             with cc_dat:
