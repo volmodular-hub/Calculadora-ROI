@@ -1,99 +1,93 @@
 import streamlit as st
-import subprocess
-import sys
-
-# ==========================================
-# 🛠️ SISTEMA DE AUTO-ACTUALIZACIÓN (IPAD FIX)
-# ==========================================
-# Esto obliga al servidor a borrar la versión vieja y poner la nueva
-# cada vez que arranca, sin que tú tengas que usar la terminal.
-try:
-    import google.generativeai as genai
-    # Verificamos si es una versión muy vieja intentando acceder a Flash
-    try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
-    except:
-        # Si falla, forzamos la actualización
-        st.toast("Actualizando cerebro IA... Espere unos segundos...", icon="🔄")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "google-generativeai"])
-        import google.generativeai as genai # Recargamos
-except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "google-generativeai"])
-    import google.generativeai as genai
-
-# ==========================================
-# 🔐 CONFIGURACIÓN
-# ==========================================
 import pandas as pd
 from fpdf import FPDF
 import datetime
 import os
 import json
 import re
+import base64
+import requests # Usamos esto para conectarnos directo, sin librerías de Google
 from PIL import Image
-import urllib.parse 
-import requests 
 from io import BytesIO
+import urllib.parse 
 
-# TU CLAVE API
+# ==========================================
+# 🔐 CONFIGURACIÓN (CLAVE GRATIS DE GOOGLE)
+# ==========================================
+# Tu clave de Google (Gemini) va aquí. Es GRATIS y NO pide tarjeta.
 GOOGLE_API_KEY = "AIzaSyBXfXVgHa9j_UrdiFrYaeQ_GgrX9LpTwDQ" 
 LOGOTIPO = "logo.png"
 
-try:
-    genai.configure(api_key=GOOGLE_API_KEY)
-except Exception as e:
-    st.error(f"Error Configuración API: {e}")
-
-st.set_page_config(page_title="Promotora IA", layout="wide", page_icon="🏗️")
+st.set_page_config(page_title="Promotora IA Directa", layout="wide", page_icon="🏗️")
 
 # ==========================================
-# 🧠 CEREBRO IA (VISIÓN & RENDER)
+# 🧠 CEREBRO IA (CONEXIÓN DIRECTA HTTP)
 # ==========================================
 
-def analizar_imagen_generico(image, tipo="testigo"):
+def analizar_imagen_directo(image, tipo="testigo"):
     """
-    Analiza imágenes usando Gemini 1.5 Flash.
+    Se conecta a Google Gemini mediante HTTP puro.
+    Esto EVITA los errores de 'Librería desactualizada'.
     """
+    # 1. Convertir imagen a Base64 (Texto)
+    buffered = BytesIO()
+    if image.mode in ("RGBA", "P"): image = image.convert("RGB")
+    image.save(buffered, format="JPEG")
+    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+
+    # 2. Preparar el Prompt
     if tipo == "testigo":
-        prompt = """
-        Actúa como un experto inmobiliario. Analiza esta imagen.
-        Extrae PRECIO DE VENTA y METROS CUADRADOS (m2).
-        Responde SOLO JSON. Formato: {"precio": 150000, "m2": 90}
-        Si no encuentras el dato, pon 0.
-        """
-    else: # SUELO
-        prompt = """
-        Analiza este cartel o anuncio de TERRENO.
-        Extrae en JSON:
-        1. "precio": Precio venta (número).
-        2. "ubicacion": Calle/Zona (texto).
-        3. "m2_suelo": Metros PARCELA (número).
-        Formato: {"precio": 100000, "ubicacion": "Zona", "m2_suelo": 500}
-        """
+        texto_prompt = "Actúa como experto inmobiliario. Extrae de la imagen: PRECIO (número) y M2 (número). Responde SOLO JSON: {'precio': 0, 'm2': 0}. Si no hay dato pon 0."
+    else:
+        texto_prompt = "Analiza el anuncio del terreno. Extrae: PRECIO (número), UBICACION (texto corto) y M2_SUELO (número). Responde SOLO JSON: {'precio': 0, 'ubicacion': '', 'm2_suelo': 0}."
 
+    # 3. La URL Mágica (Conexión Directa a Google)
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GOOGLE_API_KEY}"
+    
+    # 4. El Paquete de Datos
+    payload = {
+        "contents": [{
+            "parts": [
+                {"text": texto_prompt},
+                {"inline_data": {
+                    "mime_type": "image/jpeg",
+                    "data": img_str
+                }}
+            ]
+        }]
+    }
+    
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content([prompt, image])
+        # Enviamos la petición
+        response = requests.post(url, json=payload, headers={'Content-Type': 'application/json'})
         
-        match = re.search(r'\{.*\}', response.text, re.DOTALL)
+        if response.status_code != 200:
+            st.error(f"Error Google: {response.status_code} - {response.text}")
+            return {}
+            
+        resultado = response.json()
+        
+        # Extraer el texto de la respuesta compleja de Google
+        texto_ia = resultado['candidates'][0]['content']['parts'][0]['text']
+        
+        # Limpiar JSON
+        match = re.search(r'\{.*\}', texto_ia, re.DOTALL)
         if match:
             return json.loads(match.group(0))
         else:
             return {}
+
     except Exception as e:
-        st.error(f"Error IA: {e}")
-        # Si da error 404 aquí, el bloque de auto-update de arriba lo arreglará en el próximo reinicio
-        st.warning("⚠️ Si ves un error 404, recarga la página (F5 o tirar hacia abajo). La app se está actualizando sola.")
+        st.error(f"Error de conexión: {e}")
         return {}
 
 def generar_render_arquitectonico(ubicacion, estilo):
     """
-    Genera render usando Pollinations AI
+    Genera render usando Pollinations AI (Gratis 100%)
     """
     prompt = f"architectural render of a {estilo} house, located in {ubicacion}, sunny day, blue sky, cinematic lighting, 8k resolution, photorealistic"
     prompt_encoded = urllib.parse.quote(prompt)
-    url_imagen = f"https://image.pollinations.ai/prompt/{prompt_encoded}?width=1280&height=720&nologo=true&seed={datetime.datetime.now().microsecond}"
-    return url_imagen
+    return f"https://image.pollinations.ai/prompt/{prompt_encoded}?width=1280&height=720&nologo=true&seed={datetime.datetime.now().microsecond}"
 
 # ==========================================
 # 📄 GENERADOR PDF
@@ -104,8 +98,7 @@ class PDF(FPDF):
             try: self.image(LOGOTIPO, 10, 8, 33)
             except: pass
             self.ln(25)
-        else:
-            self.ln(10)
+        else: self.ln(10)
         self.set_font('Arial', 'B', 16)
         self.cell(0, 10, 'DOSIER DE VIABILIDAD - IA', 0, 1, 'R')
         self.ln(5)
@@ -113,7 +106,7 @@ class PDF(FPDF):
     def footer(self):
         self.set_y(-15)
         self.set_font('Arial', 'I', 8)
-        self.cell(0, 10, f'Informe generado el {datetime.date.today()}', 0, 0, 'C')
+        self.cell(0, 10, f'Generado el {datetime.date.today()}', 0, 0, 'C')
 
 def generar_pdf(terreno, testigos, financiero, render_path=None):
     pdf = PDF()
@@ -125,7 +118,6 @@ def generar_pdf(terreno, testigos, financiero, render_path=None):
     pdf.cell(0, 10, f"  Proyecto: {terreno['nombre']}", 1, 1, 'L', fill=True)
     pdf.ln(5)
 
-    # RENDER
     if render_path and os.path.exists(render_path):
         pdf.set_font('Arial', 'B', 12)
         pdf.cell(0, 10, "PROPUESTA VISUAL", 0, 1)
@@ -134,7 +126,6 @@ def generar_pdf(terreno, testigos, financiero, render_path=None):
             pdf.ln(110) 
         except: pass
     
-    # DATOS
     pdf.set_font('Arial', 'B', 12)
     pdf.cell(0, 10, "RESUMEN EJECUTIVO", 0, 1)
     pdf.set_font('Arial', '', 11)
@@ -146,10 +137,9 @@ def generar_pdf(terreno, testigos, financiero, render_path=None):
     pdf.set_font('Arial', 'B', 12)
     pdf.set_text_color(39, 174, 96)
     pdf.cell(0, 10, f"ROI PROYECTO: {financiero['roi']:.2f}%", 0, 1)
-    pdf.cell(0, 10, f"ROI ANUALIZADO ({financiero['meses']} m): {financiero['roi_anual']:.2f}%", 0, 1)
+    pdf.cell(0, 10, f"ROI ANUALIZADO: {financiero['roi_anual']:.2f}%", 0, 1)
     pdf.set_text_color(0, 0, 0)
     
-    # TESTIGOS
     if render_path: pdf.add_page()
     pdf.ln(5)
     pdf.set_font('Arial', 'B', 12)
@@ -162,22 +152,20 @@ def generar_pdf(terreno, testigos, financiero, render_path=None):
         pm2 = p/m if m>0 else 0
         pdf.set_fill_color(245, 245, 245)
         pdf.cell(0, 8, f"Testigo {i+1}: {p:,.0f} EUR ({m} m2) - {pm2:,.0f} EUR/m2", 1, 1, fill=True)
-        
         if t.get('img_path') and os.path.exists(t['img_path']):
             try:
                 pdf.image(t['img_path'], x=15, y=pdf.get_y()+2, w=50)
                 pdf.ln(40)
             except: pass
-        else:
-            pdf.ln(2)
+        else: pdf.ln(2)
 
     return pdf.output(dest='S').encode('latin-1')
 
 # ==========================================
 # 📱 INTERFAZ PRINCIPAL
 # ==========================================
-
-st.title("🏗️ Calculadora Promotora IA")
+st.title("🏗️ Calculadora Promotora (Modo Directo)")
+st.caption("Conexión directa a Google Gemini (Sin errores de librería)")
 st.markdown("---")
 
 with st.sidebar:
@@ -188,30 +176,31 @@ with st.sidebar:
     gastos_generales = st.slider("Soft Costs (%)", 5, 25, 15) / 100
     impuestos_compra = 0.10
     m2_objetivo = st.number_input("m² Construcción Objetivo", 180)
-    estilo_casa = st.selectbox("Estilo Diseño", ["Moderno Mediterráneo", "Minimalista Cubico", "Clásico", "Industrial"])
+    estilo_casa = st.selectbox("Estilo", ["Moderno Mediterráneo", "Minimalista Cubico", "Clásico", "Industrial"])
 
 if "suelo_data" not in st.session_state:
     st.session_state["suelo_data"] = {"precio": 100000.0, "nombre": "Parcela", "m2": 500.0, "render": None}
 
-# COLUMNA 1: SUELO
 c1, c2 = st.columns([1, 1.5])
+
+# SUELO
 with c1:
-    st.subheader("1. Terreno / Solar")
-    tab_m, tab_f = st.tabs(["✍️ Manual", "📸 Leer Cartel"])
-    
+    st.subheader("1. Terreno")
+    tab_m, tab_f = st.tabs(["✍️ Manual", "📸 Foto Cartel"])
     with tab_f:
-        up_suelo = st.file_uploader("Sube foto terreno", type=["jpg", "png"], key="u_suelo")
+        up_suelo = st.file_uploader("Foto Terreno", type=["jpg", "png", "jpeg"], key="u_suelo")
         if up_suelo:
             img_s = Image.open(up_suelo)
-            if st.button("🧠 Analizar Suelo"):
-                with st.spinner("Analizando..."):
-                    datos = analizar_imagen_generico(img_s, "suelo")
+            if st.button("🧠 Analizar Suelo (Directo)"):
+                with st.spinner("Conectando con Google..."):
+                    datos = analizar_imagen_directo(img_s, "suelo")
                     if datos:
                         st.session_state["suelo_data"]["precio"] = float(datos.get("precio", 0))
                         st.session_state["suelo_data"]["m2"] = float(datos.get("m2_suelo", 0))
                         ubi = datos.get("ubicacion", "")
                         if ubi: st.session_state["suelo_data"]["nombre"] = ubi
                         st.success("¡Datos extraídos!")
+                    else: st.warning("No se pudo leer.")
 
     nombre_terreno = st.text_input("Ubicación", value=st.session_state["suelo_data"]["nombre"])
     precio_terreno = st.number_input("Precio Suelo (€)", value=st.session_state["suelo_data"]["precio"], step=1000.0)
@@ -219,7 +208,7 @@ with c1:
 
     st.markdown("#### 🎨 Diseño Virtual")
     if st.button("✨ Generar Render"):
-        with st.spinner("Dibujando..."):
+        with st.spinner("Diseñando..."):
             try:
                 url_render = generar_render_arquitectonico(nombre_terreno, estilo_casa)
                 resp = requests.get(url_render)
@@ -227,32 +216,29 @@ with c1:
                     img_r = Image.open(BytesIO(resp.content))
                     img_r.save("render_temp.jpg")
                     st.session_state["suelo_data"]["render"] = "render_temp.jpg"
-                    st.image(url_render, caption=f"Propuesta: {estilo_casa}")
-            except Exception as e:
-                st.error(f"Error render: {e}")
+                    st.image(url_render, caption=estilo_casa)
+            except Exception as e: st.error(e)
 
-# COLUMNA 2: TESTIGOS
+# TESTIGOS
 with c2:
     st.subheader("2. Comparables")
     lista_testigos = []
-    
     for i in range(1, 4):
         with st.expander(f"🏠 Testigo {i}", expanded=False):
             cc_img, cc_dat = st.columns([1, 2])
             up_t = cc_img.file_uploader("Foto", key=f"ut_{i}", label_visibility="collapsed")
-            
             if f"dt_{i}" not in st.session_state: st.session_state[f"dt_{i}"] = {"p":0.0, "m":0.0, "path":None}
             
             if up_t:
                 img_t = Image.open(up_t)
-                if img_t.mode != 'RGB': img_t = img_t.convert('RGB')
                 path = f"temp_t_{i}.jpg"
+                if img_t.mode != 'RGB': img_t = img_t.convert('RGB')
                 img_t.save(path)
                 st.session_state[f"dt_{i}"]["path"] = path
                 
                 if st.session_state[f"dt_{i}"]["p"] == 0:
                     with st.spinner("Leyendo..."):
-                        datos = analizar_imagen_generico(img_t, "testigo")
+                        datos = analizar_imagen_directo(img_t, "testigo")
                         st.session_state[f"dt_{i}"]["p"] = float(datos.get("precio", 0))
                         st.session_state[f"dt_{i}"]["m"] = float(datos.get("m2", 0))
 
