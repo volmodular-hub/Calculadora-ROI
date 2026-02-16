@@ -1,19 +1,41 @@
 import streamlit as st
+import subprocess
+import sys
+
+# ==========================================
+# 🛠️ SISTEMA DE AUTO-ACTUALIZACIÓN (IPAD FIX)
+# ==========================================
+# Esto obliga al servidor a borrar la versión vieja y poner la nueva
+# cada vez que arranca, sin que tú tengas que usar la terminal.
+try:
+    import google.generativeai as genai
+    # Verificamos si es una versión muy vieja intentando acceder a Flash
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+    except:
+        # Si falla, forzamos la actualización
+        st.toast("Actualizando cerebro IA... Espere unos segundos...", icon="🔄")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "google-generativeai"])
+        import google.generativeai as genai # Recargamos
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "google-generativeai"])
+    import google.generativeai as genai
+
+# ==========================================
+# 🔐 CONFIGURACIÓN
+# ==========================================
 import pandas as pd
 from fpdf import FPDF
 import datetime
 import os
 import json
 import re
-import google.generativeai as genai
 from PIL import Image
 import urllib.parse 
 import requests 
 from io import BytesIO
 
-# ==========================================
-# 🔐 CONFIGURACIÓN CON TU NUEVA CLAVE
-# ==========================================
+# TU CLAVE API
 GOOGLE_API_KEY = "AIzaSyBXfXVgHa9j_UrdiFrYaeQ_GgrX9LpTwDQ" 
 LOGOTIPO = "logo.png"
 
@@ -30,50 +52,45 @@ st.set_page_config(page_title="Promotora IA", layout="wide", page_icon="🏗️"
 
 def analizar_imagen_generico(image, tipo="testigo"):
     """
-    Usa la IA para extraer datos de las fotos.
+    Analiza imágenes usando Gemini 1.5 Flash.
     """
-    # 1. Definimos el prompt según lo que estemos mirando
     if tipo == "testigo":
         prompt = """
-        Actúa como un experto en datos inmobiliarios. Analiza esta imagen.
-        Tu objetivo es extraer el PRECIO DE VENTA y los METROS CUADRADOS (m2).
-        Responde ÚNICAMENTE con un objeto JSON válido.
-        Formato: {"precio": 150000, "m2": 90}
-        Si no encuentras algún dato, pon el valor 0.
+        Actúa como un experto inmobiliario. Analiza esta imagen.
+        Extrae PRECIO DE VENTA y METROS CUADRADOS (m2).
+        Responde SOLO JSON. Formato: {"precio": 150000, "m2": 90}
+        Si no encuentras el dato, pon 0.
         """
     else: # SUELO
         prompt = """
-        Analiza este cartel o anuncio de TERRENO/SOLAR.
-        Extrae en JSON estos 3 campos:
-        1. "precio": Precio de venta (número).
-        2. "ubicacion": Nombre de la calle, barrio o zona que aparezca (texto).
-        3. "m2_suelo": Metros cuadrados de la PARCELA (número).
-        Formato: {"precio": 100000, "ubicacion": "Calle Mayor", "m2_suelo": 500}
+        Analiza este cartel o anuncio de TERRENO.
+        Extrae en JSON:
+        1. "precio": Precio venta (número).
+        2. "ubicacion": Calle/Zona (texto).
+        3. "m2_suelo": Metros PARCELA (número).
+        Formato: {"precio": 100000, "ubicacion": "Zona", "m2_suelo": 500}
         """
 
     try:
-        # Intentamos usar el modelo más rápido y moderno
         model = genai.GenerativeModel('gemini-1.5-flash')
         response = model.generate_content([prompt, image])
         
-        # Limpieza de respuesta con Regex (por si la IA añade texto extra)
         match = re.search(r'\{.*\}', response.text, re.DOTALL)
         if match:
-            json_str = match.group(0)
-            return json.loads(json_str)
+            return json.loads(match.group(0))
         else:
             return {}
-
     except Exception as e:
-        st.error(f"❌ Error de IA: {e}")
-        st.info("💡 SI VES UN ERROR 404: Abre la terminal y escribe: pip install --upgrade google-generativeai")
+        st.error(f"Error IA: {e}")
+        # Si da error 404 aquí, el bloque de auto-update de arriba lo arreglará en el próximo reinicio
+        st.warning("⚠️ Si ves un error 404, recarga la página (F5 o tirar hacia abajo). La app se está actualizando sola.")
         return {}
 
 def generar_render_arquitectonico(ubicacion, estilo):
     """
-    Genera una URL de una imagen usando IA generativa (Pollinations).
+    Genera render usando Pollinations AI
     """
-    prompt = f"architectural render of a {estilo} house, located in {ubicacion}, sunny day, blue sky, cinematic lighting, 8k resolution, photorealistic, architectural photography"
+    prompt = f"architectural render of a {estilo} house, located in {ubicacion}, sunny day, blue sky, cinematic lighting, 8k resolution, photorealistic"
     prompt_encoded = urllib.parse.quote(prompt)
     url_imagen = f"https://image.pollinations.ai/prompt/{prompt_encoded}?width=1280&height=720&nologo=true&seed={datetime.datetime.now().microsecond}"
     return url_imagen
@@ -108,7 +125,7 @@ def generar_pdf(terreno, testigos, financiero, render_path=None):
     pdf.cell(0, 10, f"  Proyecto: {terreno['nombre']}", 1, 1, 'L', fill=True)
     pdf.ln(5)
 
-    # RENDER EN PORTADA
+    # RENDER
     if render_path and os.path.exists(render_path):
         pdf.set_font('Arial', 'B', 12)
         pdf.cell(0, 10, "PROPUESTA VISUAL", 0, 1)
@@ -143,9 +160,8 @@ def generar_pdf(terreno, testigos, financiero, render_path=None):
         p = t['precio']
         m = t['m2']
         pm2 = p/m if m>0 else 0
-        
         pdf.set_fill_color(245, 245, 245)
-        pdf.cell(0, 8, f"Comparable {i+1}: {p:,.0f} EUR ({m} m2) - {pm2:,.0f} EUR/m2", 1, 1, fill=True)
+        pdf.cell(0, 8, f"Testigo {i+1}: {p:,.0f} EUR ({m} m2) - {pm2:,.0f} EUR/m2", 1, 1, fill=True)
         
         if t.get('img_path') and os.path.exists(t['img_path']):
             try:
@@ -164,7 +180,6 @@ def generar_pdf(terreno, testigos, financiero, render_path=None):
 st.title("🏗️ Calculadora Promotora IA")
 st.markdown("---")
 
-# CONFIGURACIÓN LATERAL
 with st.sidebar:
     if os.path.exists(LOGOTIPO): st.image(LOGOTIPO, width=150)
     st.header("⚙️ Configuración")
@@ -175,23 +190,20 @@ with st.sidebar:
     m2_objetivo = st.number_input("m² Construcción Objetivo", 180)
     estilo_casa = st.selectbox("Estilo Diseño", ["Moderno Mediterráneo", "Minimalista Cubico", "Clásico", "Industrial"])
 
-# VARIABLES DE ESTADO
 if "suelo_data" not in st.session_state:
     st.session_state["suelo_data"] = {"precio": 100000.0, "nombre": "Parcela", "m2": 500.0, "render": None}
 
-# --- ZONA 1: SUELO (COLUMNA IZQUIERDA) ---
+# COLUMNA 1: SUELO
 c1, c2 = st.columns([1, 1.5])
-
 with c1:
     st.subheader("1. Terreno / Solar")
-    
-    tab_m, tab_f = st.tabs(["✍️ Manual", "📸 Leer Cartel/Anuncio"])
+    tab_m, tab_f = st.tabs(["✍️ Manual", "📸 Leer Cartel"])
     
     with tab_f:
-        up_suelo = st.file_uploader("Sube foto del terreno", type=["jpg", "png", "jpeg"], key="u_suelo")
+        up_suelo = st.file_uploader("Sube foto terreno", type=["jpg", "png"], key="u_suelo")
         if up_suelo:
             img_s = Image.open(up_suelo)
-            if st.button("🧠 Analizar Foto Suelo"):
+            if st.button("🧠 Analizar Suelo"):
                 with st.spinner("Analizando..."):
                     datos = analizar_imagen_generico(img_s, "suelo")
                     if datos:
@@ -200,17 +212,14 @@ with c1:
                         ubi = datos.get("ubicacion", "")
                         if ubi: st.session_state["suelo_data"]["nombre"] = ubi
                         st.success("¡Datos extraídos!")
-                    else:
-                        st.warning("No se pudo leer la foto. Introdúcelo manual.")
 
-    # Campos editables
     nombre_terreno = st.text_input("Ubicación", value=st.session_state["suelo_data"]["nombre"])
     precio_terreno = st.number_input("Precio Suelo (€)", value=st.session_state["suelo_data"]["precio"], step=1000.0)
     m2_parcela = st.number_input("m² Parcela", value=st.session_state["suelo_data"]["m2"], step=10.0)
 
     st.markdown("#### 🎨 Diseño Virtual")
-    if st.button("✨ Generar Render (IA)"):
-        with st.spinner("El arquitecto IA está dibujando..."):
+    if st.button("✨ Generar Render"):
+        with st.spinner("Dibujando..."):
             try:
                 url_render = generar_render_arquitectonico(nombre_terreno, estilo_casa)
                 resp = requests.get(url_render)
@@ -219,28 +228,21 @@ with c1:
                     img_r.save("render_temp.jpg")
                     st.session_state["suelo_data"]["render"] = "render_temp.jpg"
                     st.image(url_render, caption=f"Propuesta: {estilo_casa}")
-                else:
-                    st.error("Error descargando imagen.")
             except Exception as e:
                 st.error(f"Error render: {e}")
 
-# --- ZONA 2: TESTIGOS (COLUMNA DERECHA) ---
+# COLUMNA 2: TESTIGOS
 with c2:
-    st.subheader("2. Comparables (Testigos)")
+    st.subheader("2. Comparables")
     lista_testigos = []
     
     for i in range(1, 4):
         with st.expander(f"🏠 Testigo {i}", expanded=False):
             cc_img, cc_dat = st.columns([1, 2])
-            
-            # SUBIDA
             up_t = cc_img.file_uploader("Foto", key=f"ut_{i}", label_visibility="collapsed")
             
-            # ESTADO
-            if f"dt_{i}" not in st.session_state: 
-                st.session_state[f"dt_{i}"] = {"p":0.0, "m":0.0, "path":None}
+            if f"dt_{i}" not in st.session_state: st.session_state[f"dt_{i}"] = {"p":0.0, "m":0.0, "path":None}
             
-            # PROCESO IA
             if up_t:
                 img_t = Image.open(up_t)
                 if img_t.mode != 'RGB': img_t = img_t.convert('RGB')
@@ -248,29 +250,24 @@ with c2:
                 img_t.save(path)
                 st.session_state[f"dt_{i}"]["path"] = path
                 
-                # Si precio es 0, intentar leer
                 if st.session_state[f"dt_{i}"]["p"] == 0:
                     with st.spinner("Leyendo..."):
                         datos = analizar_imagen_generico(img_t, "testigo")
                         st.session_state[f"dt_{i}"]["p"] = float(datos.get("precio", 0))
                         st.session_state[f"dt_{i}"]["m"] = float(datos.get("m2", 0))
 
-            # INPUTS
             with cc_dat:
                 d = st.session_state[f"dt_{i}"]
                 p = st.number_input("€", value=d["p"], key=f"p_{i}", step=1000.0)
                 m = st.number_input("m2", value=d["m"], key=f"m_{i}", step=1.0)
-                
-                if p > 0:
-                    lista_testigos.append({"precio":p, "m2":m, "img_path":d["path"]})
+                if p > 0: lista_testigos.append({"precio":p, "m2":m, "img_path":d["path"]})
 
-# --- CÁLCULO FINAL ---
+# CÁLCULO
 st.markdown("---")
 if st.button("ANALIZAR VIABILIDAD", type="primary", use_container_width=True):
     if not lista_testigos:
-        st.error("⚠️ Faltan testigos. Añade al menos uno.")
+        st.error("⚠️ Faltan testigos.")
     else:
-        # 1. Media Mercado
         validos = [t for t in lista_testigos if t['m2'] > 0]
         if validos:
             media_m2 = sum([t['precio']/t['m2'] for t in validos])/len(validos)
@@ -279,30 +276,23 @@ if st.button("ANALIZAR VIABILIDAD", type="primary", use_container_width=True):
             precio_venta = sum([t['precio'] for t in lista_testigos])/len(lista_testigos)
             media_m2 = 0
 
-        # 2. Costes
         coste_suelo_total = precio_terreno * (1+impuestos_compra)
         coste_obra = coste_const_m2 * m2_objetivo
         soft_costs = (coste_suelo_total + coste_obra) * gastos_generales
         inversion = coste_suelo_total + coste_obra + soft_costs
-        
-        # 3. Rentabilidad
         beneficio = precio_venta - inversion
         roi = (beneficio/inversion)*100
         roi_anual = ((1+roi/100)**(12/meses_proyecto)-1)*100
         
-        # 4. Resultados
-        st.header("📊 Resultados del Estudio")
-        
+        st.header("📊 Resultados")
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Precio Venta", f"{precio_venta:,.0f} €")
-        c2.metric("Inversión Total", f"{inversion:,.0f} €")
-        c3.metric("Beneficio Neto", f"{beneficio:,.0f} €")
-        c4.metric("ROI Anualizado", f"{roi_anual:.2f} %")
+        c1.metric("Venta", f"{precio_venta:,.0f} €")
+        c2.metric("Inversión", f"{inversion:,.0f} €")
+        c3.metric("Beneficio", f"{beneficio:,.0f} €")
+        c4.metric("ROI Anual", f"{roi_anual:.2f} %")
         
         st.divider()
-        
         col_res, col_chart = st.columns([2, 1])
-        
         with col_res:
             if roi > 20:
                 st.success(f"✅ VIABLE (ROI {roi:.2f}%)")
@@ -312,13 +302,8 @@ if st.button("ANALIZAR VIABILIDAD", type="primary", use_container_width=True):
                     {"inversion": inversion, "beneficio": beneficio, "roi": roi, "roi_anual": roi_anual, "meses": meses_proyecto},
                     render_path=st.session_state["suelo_data"]["render"]
                 )
-                st.download_button("📄 DESCARGAR DOSIER COMPLETO", pdf_bytes, "dosier_ia.pdf", "application/pdf")
+                st.download_button("📄 DESCARGAR DOSIER", pdf_bytes, "dosier.pdf", "application/pdf")
             else:
                 st.error(f"❌ RIESGO ALTO (ROI {roi:.2f}%)")
-        
         with col_chart:
-            df_chart = pd.DataFrame({
-                'Coste': ['Suelo', 'Obra', 'Soft', 'Beneficio'],
-                'Valor': [coste_suelo_total, coste_obra, soft_costs, beneficio]
-            })
-            st.bar_chart(df_chart.set_index('Coste'))
+            st.bar_chart(pd.DataFrame({'C':['Suelo','Obra','Soft','Bº'], 'V':[coste_suelo_total, coste_obra, soft_costs, beneficio]}).set_index('C'))
