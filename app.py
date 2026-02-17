@@ -131,8 +131,8 @@ def generar_render(ubicacion, estilo):
 # ==========================================
 # 📱 INTERFAZ DE USUARIO (STREAMLIT)
 # ==========================================
-st.title("🏗️ Calculadora Promotora (Manual & Visual)")
-st.caption("Introduce los datos y sube las fotos para generar el dosier.")
+st.title("🏗️ Calculadora Promotora 360º")
+st.caption("VÖL Modular")
 st.markdown("---")
 
 # --- BARRA LATERAL ---
